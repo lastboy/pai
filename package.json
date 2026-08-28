@@ -1,8 +1,26 @@
 {
-  "name": "pai",
+  "name": "@lastboy/pai",
   "version": "0.1.0",
-  "private": true,
-  "description": "PAI — Personal AI Supervisor",
+  "description": "PAI — Personal AI Supervisor: a local-first CLI that observes how you work with AI coding agents and turns it into knowledge you own",
+  "keywords": [
+    "cli",
+    "claude-code",
+    "ai",
+    "coding-agent",
+    "developer-tools",
+    "local-first",
+    "productivity"
+  ],
+  "homepage": "https://github.com/lastboy/pai#readme",
+  "bugs": {
+    "url": "https://github.com/lastboy/pai/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lastboy/pai.git"
+  },
+  "license": "MIT",
+  "author": "Arik Lewin",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -10,11 +28,21 @@
   "bin": {
     "pai": "./dist/cli/index.js"
   },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "tsx src/cli/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "commander": "^15.0.0"

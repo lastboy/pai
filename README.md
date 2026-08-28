@@ -15,6 +15,14 @@ layers every feature is built against.
 Requires Node.js 22+ (developed on 24).
 
 ```bash
+npm install -g @lastboy/pai
+```
+
+The package is scoped, but the command it installs is `pai`.
+
+### From source
+
+```bash
 npm install
 npm run build
 npm link          # makes `pai` available everywhere
