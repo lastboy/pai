@@ -110,6 +110,13 @@ pai import mine.json
 
 Invalid or unsupported files fail with a clear message and a non-zero exit code.
 
+**Cross-platform.** A store exported on macOS or Linux imports on Windows and
+back. Stores contain no filesystem paths, so nothing is machine-specific, and
+import accepts the encodings Windows tooling produces: UTF-8, UTF-8 with a BOM
+(Notepad, `Set-Content`) and UTF-16 with a BOM (PowerShell 5.1's `>` redirect).
+Line endings are normalized, so the same rule written on Windows and on
+macOS/Linux merges as one instead of duplicating.
+
 ### `pai experiment …`
 
 Experimental commands. They may change or disappear, and they are the only

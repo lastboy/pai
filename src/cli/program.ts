@@ -31,6 +31,7 @@ import {
   readStore,
   writeStore,
 } from '../persistence/rule-store-files.js'
+import { decodeTextFile } from '../persistence/text-file.js'
 import { parseSelection, renderGuidelines, renderReview, renderSessionList } from './render.js'
 
 async function ask(question: string): Promise<string> {
@@ -172,7 +173,7 @@ export function createProgram(out: OutputWriter): Command {
     .action(async (file: string, options: { dryRun?: boolean }) => {
       let incoming: RuleStore
       try {
-        incoming = parseRuleStore(await readFile(file, 'utf8'))
+        incoming = parseRuleStore(decodeTextFile(await readFile(file)))
       } catch (error) {
         out(error instanceof Error ? error.message : String(error))
         process.exitCode = 1

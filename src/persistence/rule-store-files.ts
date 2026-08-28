@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { emptyStore, parseRuleStore, serializeRuleStore, type RuleStore } from '../core/rule-store.js'
+import { readTextFile } from './text-file.js'
 
 // PAI writes only to its own agent-neutral `.pai/` directories.
 export function globalStorePath(home: string = homedir()): string {
@@ -15,7 +16,7 @@ export function projectStorePath(cwd: string): string {
 export function readStore(path: string): RuleStore {
   let contents: string
   try {
-    contents = readFileSync(path, 'utf8')
+    contents = readTextFile(path)
   } catch {
     return emptyStore()
   }
