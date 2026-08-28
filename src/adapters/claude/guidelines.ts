@@ -26,7 +26,8 @@ const BULLET = /^\s*[-*]\s+(.+?)\s*$/
 export function parseGuidelines(markdown: string): Guideline[] {
   const guidelines: Guideline[] = []
   let category = 'General'
-  for (const line of markdown.split('\n')) {
+  // A BOM (Windows editors) would otherwise hide the first heading.
+  for (const line of markdown.replace(/^﻿/, '').split('\n')) {
     const heading = HEADING.exec(line)
     if (heading?.[1]) {
       category = heading[1]

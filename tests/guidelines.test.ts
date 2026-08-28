@@ -33,6 +33,17 @@ describe('parseGuidelines', () => {
   it('ignores prose and returns empty for bullet-free markdown', () => {
     expect(parseGuidelines('# Title\n\nJust prose.\n')).toEqual([])
   })
+
+  it('keeps the first heading when the file was saved with a BOM', () => {
+    const md = '# Engineering Standards\n- Never commit without asking\n'
+    expect(parseGuidelines(`﻿${md}`)).toEqual([
+      { category: 'Engineering Standards', text: 'Never commit without asking' },
+    ])
+  })
+
+  it('handles CRLF line endings', () => {
+    expect(parseGuidelines(markdown.replace(/\n/g, '\r\n'))).toEqual(parseGuidelines(markdown))
+  })
 })
 
 describe('findGuidelineFiles', () => {

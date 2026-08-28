@@ -68,6 +68,11 @@ async function chooseSession(out: OutputWriter): Promise<ClaudeSessionListing | 
 
 export type OutputWriter = (line: string) => void
 
+/** Node's fs errors are readable already; anything else gets stringified. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 // Same relative depth from src/cli and dist/cli.
 function packageVersion(): string {
   const pkg = JSON.parse(
@@ -100,7 +105,7 @@ export function createProgram(out: OutputWriter): Command {
         return
       }
 
-      const transcript = await readFile(chosen.path, 'utf8')
+      const transcript = decodeTextFile(await readFile(chosen.path))
       const session = parseTranscript(transcript, chosen.id)
       for (const line of renderReview(buildReview(session))) {
         out(line)
@@ -119,7 +124,7 @@ export function createProgram(out: OutputWriter): Command {
         files.map(async (file) => ({
           scope: file.scope,
           path: file.path,
-          guidelines: parseGuidelines(await readFile(file.path, 'utf8')),
+          guidelines: parseGuidelines(decodeTextFile(await readFile(file.path))),
         })),
       )
       // --global and --project together = no scope filter (same as neither).
@@ -148,21 +153,26 @@ export function createProgram(out: OutputWriter): Command {
         process.exitCode = 1
         return
       }
-      const global = readStore(globalStorePath())
-      const project = readStore(projectStorePath(process.cwd()))
-      const combined: RuleStore = {
-        ...emptyStore(),
-        rules: [...global.rules, ...project.rules].filter(
-          (rule) => options.scope === undefined || rule.scope === options.scope,
-        ),
+      try {
+        const global = readStore(globalStorePath())
+        const project = readStore(projectStorePath(process.cwd()))
+        const combined: RuleStore = {
+          ...emptyStore(),
+          rules: [...global.rules, ...project.rules].filter(
+            (rule) => options.scope === undefined || rule.scope === options.scope,
+          ),
+        }
+        const json = serializeRuleStore(combined)
+        if (options.out === undefined) {
+          out(json.trimEnd())
+          return
+        }
+        writeFileSync(options.out, json, 'utf8')
+        out(`Exported ${combined.rules.length} rule(s) to ${options.out}`)
+      } catch (error) {
+        out(`Export failed: ${describeError(error)}`)
+        process.exitCode = 1
       }
-      const json = serializeRuleStore(combined)
-      if (options.out === undefined) {
-        out(json.trimEnd())
-        return
-      }
-      writeFileSync(options.out, json, 'utf8')
-      out(`Exported ${combined.rules.length} rule(s) to ${options.out}`)
     })
 
   program
@@ -175,7 +185,7 @@ export function createProgram(out: OutputWriter): Command {
       try {
         incoming = parseRuleStore(decodeTextFile(await readFile(file)))
       } catch (error) {
-        out(error instanceof Error ? error.message : String(error))
+        out(`Could not read ${file}: ${describeError(error)}`)
         process.exitCode = 1
         return
       }
@@ -184,14 +194,21 @@ export function createProgram(out: OutputWriter): Command {
         { scope: 'global' as const, path: globalStorePath() },
         { scope: 'project' as const, path: projectStorePath(process.cwd()) },
       ]
-      for (const target of targets) {
-        const rules = incoming.rules.filter((rule) => rule.scope === target.scope)
-        if (rules.length === 0) continue
-        const result = mergeStores(readStore(target.path), { ...emptyStore(), rules })
-        if (!options.dryRun) writeStore(target.path, result.store)
-        out(
-          `${target.scope}: ${result.added} added, ${result.merged} updated with new evidence, ${result.store.rules.length} total → ${target.path}`,
-        )
+      try {
+        for (const target of targets) {
+          const rules = incoming.rules.filter((rule) => rule.scope === target.scope)
+          if (rules.length === 0) continue
+          const result = mergeStores(readStore(target.path), { ...emptyStore(), rules })
+          if (!options.dryRun) writeStore(target.path, result.store)
+          out(
+            `${target.scope}: ${result.added} added, ${result.merged} updated with new evidence, ${result.store.rules.length} total → ${target.path}`,
+          )
+        }
+      } catch (error) {
+        out(`Import failed: ${describeError(error)}`)
+        out('Nothing was changed for the scope that failed.')
+        process.exitCode = 1
+        return
       }
       if (incoming.rules.length === 0) out('Nothing to import — the file contains no rules.')
       if (options.dryRun) out('(dry run — nothing was written)')
@@ -213,7 +230,7 @@ export function createProgram(out: OutputWriter): Command {
         return
       }
 
-      const transcript = await readFile(chosen.path, 'utf8')
+      const transcript = decodeTextFile(await readFile(chosen.path))
       const events = parseEvents(transcript)
       const candidates = events
         .map((event, index) => ({ event, index }))
@@ -307,7 +324,7 @@ export function createProgram(out: OutputWriter): Command {
         process.exitCode = 1
         return
       }
-      const transcript = await readFile(chosen.path, 'utf8')
+      const transcript = decodeTextFile(await readFile(chosen.path))
       const messages = parseEvents(transcript).filter((e) => e.kind === 'user')
       const limit = Math.max(1, Number(options.limit) || 10)
       const sample = messages.slice(-limit)
