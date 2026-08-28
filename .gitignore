@@ -1,0 +1,101 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+jspm_packages/
+
+# Build output
+dist/
+build/
+out/
+lib/
+*.tsbuildinfo
+
+# Tests & coverage
+coverage/
+.nyc_output/
+.vitest/
+*.lcov
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.node_repl_history
+
+# Environment & secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+*.gpg
+credentials.json
+secrets.json
+secrets.yaml
+.npmrc
+.netrc
+
+# PAI's own local data (learned rules contain your own words)
+.pai/
+
+# Local agent settings
+.claude/settings.local.json
+
+# Archives & large binaries
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.gz
+*.bz2
+*.xz
+*.dmg
+*.iso
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Caches & temp
+.cache/
+.temp/
+.tmp/
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+.eslintcache
+.parcel-cache/
+
+# Editors & IDEs
+.idea/
+.vscode/
+*.sublime-workspace
+*.swp
+*.swo
+*~
+.history/
+
+# OS files
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini

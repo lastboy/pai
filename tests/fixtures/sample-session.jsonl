@@ -1,0 +1,17 @@
+{"type":"user","timestamp":"2026-01-10T17:14:00.000Z","isSidechain":false,"message":{"role":"user","content":"Please add a health endpoint"}}
+{"type":"assistant","timestamp":"2026-01-10T17:14:05.000Z","isSidechain":false,"message":{"id":"msg_1","model":"claude-test-1","content":[{"type":"text","text":"Sure, adding it."}]}}
+{"type":"assistant","timestamp":"2026-01-10T17:14:06.000Z","isSidechain":false,"message":{"id":"msg_1","model":"claude-test-1","content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/app/src/server.ts"}}]}}
+{"type":"user","timestamp":"2026-01-10T17:14:07.000Z","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","is_error":false}]}}
+{"type":"assistant","timestamp":"2026-01-10T17:14:10.000Z","isSidechain":false,"message":{"id":"msg_2","model":"claude-test-1","content":[{"type":"tool_use","id":"tu_2","name":"Edit","input":{"file_path":"/app/src/server.ts"}}]}}
+{"type":"user","timestamp":"2026-01-10T17:14:11.000Z","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_2"}]}}
+{"type":"assistant","timestamp":"2026-01-10T17:14:15.000Z","isSidechain":false,"message":{"id":"msg_2","model":"claude-test-1","content":[{"type":"tool_use","id":"tu_3","name":"Bash","input":{"command":"npm test"}}]}}
+{"type":"user","timestamp":"2026-01-10T17:14:20.000Z","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_3","is_error":true}]}}
+{"type":"user","timestamp":"2026-01-10T17:20:00.000Z","isSidechain":false,"message":{"role":"user","content":"No, don't change the router, we agreed to keep it"}}
+{"type":"user","timestamp":"2026-01-10T17:21:00.000Z","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"meta noise"}]}}
+{"type":"user","timestamp":"2026-01-10T17:21:30.000Z","isSidechain":true,"message":{"role":"user","content":"subagent prompt, not the human"}}
+{"type":"user","timestamp":"2026-01-10T17:21:40.000Z","isSidechain":false,"message":{"role":"user","content":"<command-name>/compact</command-name>"}}
+{"type":"attachment","timestamp":"2026-01-10T17:22:00.000Z","attachment":{}}
+{"type":"assistant","timestamp":"2026-01-10T17:24:00.000Z","isSidechain":false,"message":{"id":"msg_3","model":"claude-test-1","content":[{"type":"text","text":"Reverted."}]}}
+not valid json at all
+{"type":"ai-title","aiTitle":"noise"}
+{"type":"ai-title","sessionId":"fix-1","aiTitle":"Add health endpoint"}
