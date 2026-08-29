@@ -72,4 +72,77 @@ describe('pai import', () => {
     ])
     expect(existsSync(join(home, '.claude', 'CLAUDE.pai.md'))).toBe(true)
   })
+
+  it('prints a "Migrated from format" line before the Target lines', async () => {
+    const v1File = join(mkdtempSync(join(tmpdir(), 'pai-export-')), 'rules.json')
+    writeFileSync(
+      v1File,
+      JSON.stringify({
+        version: 1,
+        rules: [{ rule: 'Ask first.', category: 'Decisions', scope: 'global' }],
+      }),
+    )
+    const lines: string[] = []
+    await createProgram((line) => lines.push(line)).parseAsync(['import', v1File], {
+      from: 'user',
+    })
+
+    expect(lines[0]).toBe('Migrated from format 1.')
+    expect(lines[1]).toBe(`Target (global): ${join(home, '.claude')}`)
+  })
+})
+
+describe('pai import --validate', () => {
+  it('prints a summary for a valid file and writes nothing', async () => {
+    const lines: string[] = []
+    await createProgram((line) => lines.push(line)).parseAsync(['import', file, '--validate'], {
+      from: 'user',
+    })
+
+    expect(lines).toEqual([
+      'Valid PAI export (format 2, pai 0.3.1, exported 2026-08-29T12:00:00.000Z)',
+      'Rules: 2 (global 2, project 0)',
+    ])
+    expect(existsSync(join(home, '.claude'))).toBe(false)
+  })
+
+  it('prints a "Migrated from" line for a v1 file and writes nothing', async () => {
+    const v1File = join(mkdtempSync(join(tmpdir(), 'pai-export-')), 'rules.json')
+    writeFileSync(
+      v1File,
+      JSON.stringify({
+        version: 1,
+        rules: [{ rule: 'Ask first.', category: 'Decisions', scope: 'global' }],
+      }),
+    )
+    const lines: string[] = []
+    await createProgram((line) => lines.push(line)).parseAsync(['import', v1File, '--validate'], {
+      from: 'user',
+    })
+
+    expect(lines).toEqual([
+      'Valid PAI export (format 2, pai unknown)',
+      'Rules: 1 (global 1, project 0)',
+      'Migrated from format 1 (would be imported as format 2)',
+    ])
+    expect(existsSync(join(home, '.claude'))).toBe(false)
+  })
+
+  it('exits 1 and prints problems for an invalid file', async () => {
+    const badFile = join(mkdtempSync(join(tmpdir(), 'pai-export-')), 'rules.json')
+    writeFileSync(badFile, JSON.stringify({ version: 2, rules: [{ scope: 'team' }] }))
+    const lines: string[] = []
+    const previousExitCode = process.exitCode
+    process.exitCode = undefined
+    await createProgram((line) => lines.push(line)).parseAsync(['import', badFile, '--validate'], {
+      from: 'user',
+    })
+
+    expect(lines[0]).toMatch(/^Invalid PAI export: 2 problem\(s\)$/)
+    expect(lines).toContain('  - rules[0].rule: expected non-empty string (max 500 chars)')
+    expect(lines).toContain('  - rules[0].scope: expected "global" or "project"')
+    expect(process.exitCode).toBe(1)
+    expect(existsSync(join(home, '.claude'))).toBe(false)
+    process.exitCode = previousExitCode
+  })
 })

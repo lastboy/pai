@@ -1,6 +1,6 @@
 {
   "name": "@lastboy/pai",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "PAI — Personal AI Supervisor: a local-first CLI that observes how you work with AI coding agents and turns it into knowledge you own",
   "keywords": [
     "cli",

@@ -29,6 +29,7 @@ import {
   toExportRules,
   type ExportDocument,
 } from '../core/managed-guidelines.js'
+import { CURRENT_EXPORT_FORMAT } from '../core/export-migrations.js'
 import {
   importManagedGuidelines,
   readGuidelineGroups,
@@ -73,6 +74,23 @@ export type OutputWriter = (line: string) => void
 /** Node's fs errors are readable already; anything else gets stringified. */
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Best-effort read of the file's own `pai`/`exportedAt` fields for the
+ * `--validate` summary. Only called after `parseExportDocument` has already
+ * succeeded on the same text, so this re-parse cannot fail in practice.
+ */
+function readExportMeta(text: string): { pai?: string; exportedAt?: string } {
+  try {
+    const parsed = JSON.parse(text.replace(/^﻿/, '')) as Record<string, unknown>
+    return {
+      ...(typeof parsed['pai'] === 'string' ? { pai: parsed['pai'] } : {}),
+      ...(typeof parsed['exportedAt'] === 'string' ? { exportedAt: parsed['exportedAt'] } : {}),
+    }
+  } catch {
+    return {}
+  }
 }
 
 // Same relative depth from src/cli and dist/cli.
@@ -175,19 +193,42 @@ export function createProgram(out: OutputWriter): Command {
     .argument('<file>', 'JSON file previously produced by "pai export"')
     .description('Merge rules from a file into CLAUDE.pai.md on this machine (never overwrites)')
     .option('--dry-run', 'show what would change without writing')
-    .action(async (file: string, options: { dryRun?: boolean }) => {
-      let incoming: ExportDocument
+    .option('--validate', 'check the file only; print a summary and exit without writing')
+    .action(async (file: string, options: { dryRun?: boolean; validate?: boolean }) => {
+      const text = decodeTextFile(await readFile(file))
+      let incoming: ExportDocument & { migratedFrom?: number }
       try {
-        incoming = parseExportDocument(decodeTextFile(await readFile(file)), {
-          currentPaiVersion: packageVersion(),
-        })
+        incoming = parseExportDocument(text, { currentPaiVersion: packageVersion() })
       } catch (error) {
-        out(`Could not read ${file}: ${describeError(error)}`)
+        if (options.validate) {
+          for (const line of describeError(error).split('\n')) out(line)
+        } else {
+          out(`Could not read ${file}: ${describeError(error)}`)
+        }
         process.exitCode = 1
         return
       }
 
+      if (options.validate) {
+        const meta = readExportMeta(text)
+        const paiPart = meta.pai !== undefined ? `pai ${meta.pai}` : 'pai unknown'
+        const exportedPart = meta.exportedAt !== undefined ? `, exported ${meta.exportedAt}` : ''
+        out(`Valid PAI export (format ${CURRENT_EXPORT_FORMAT}, ${paiPart}${exportedPart})`)
+        const global = incoming.rules.filter((rule) => rule.scope === 'global').length
+        const project = incoming.rules.filter((rule) => rule.scope === 'project').length
+        out(`Rules: ${incoming.rules.length} (global ${global}, project ${project})`)
+        if (incoming.migratedFrom !== undefined) {
+          out(
+            `Migrated from format ${incoming.migratedFrom} (would be imported as format ${CURRENT_EXPORT_FORMAT})`,
+          )
+        }
+        return
+      }
+
       try {
+        if (incoming.migratedFrom !== undefined) {
+          out(`Migrated from format ${incoming.migratedFrom}.`)
+        }
         for (const scope of ['global', 'project'] as const) {
           const rules = incoming.rules.filter((rule) => rule.scope === scope)
           if (rules.length === 0) continue

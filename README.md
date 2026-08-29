@@ -128,13 +128,19 @@ Hand-written `CLAUDE.md` rules are never used for deduplication — only
 | Option | Effect |
 |---|---|
 | `--dry-run` | report what would change ("would add …") without writing |
+| `--validate` | check the file only — parse, migrate, validate — and print a summary; writes nothing |
 
 ```bash
 pai import mine.json --dry-run
 pai import mine.json
+pai import mine.json --validate
 ```
 
 Invalid or unsupported files fail with a clear message and a non-zero exit code.
+Files from an older export format are migrated automatically; files from a
+newer format than this `pai` supports are rejected with an upgrade hint. See
+[the export format contract](docs/export-format.md) for the full JSON shape,
+field constraints, and migration/compatibility rules.
 
 **Cross-platform.** A file exported on macOS or Linux imports on Windows and
 back. Exports contain no filesystem paths, so nothing is machine-specific, and

@@ -3,7 +3,8 @@
 // merges into it. Everything here is pure — paths and I/O live elsewhere.
 
 import { HEADING, parseGuidelines, type GuidelineGroup } from './guidelines.js'
-import { parseRuleStore, ruleId } from './rule-store.js'
+import { ruleId } from './rule-store.js'
+import { CURRENT_EXPORT_FORMAT, migrateExport } from './export-migrations.js'
 
 export type GuidelineScope = 'global' | 'project'
 
@@ -29,8 +30,6 @@ export interface ParseExportOptions {
   currentPaiVersion: string
 }
 
-const EXPORT_VERSION = 2
-
 export const MANAGED_HEADER =
   '<!-- Managed by PAI. Hand-written rules belong in CLAUDE.md; PAI adds rules here via `pai import` / `pai learn`. -->'
 
@@ -46,11 +45,102 @@ export function toExportRules(groups: GuidelineGroup[]): ExportedRule[] {
 }
 
 export function serializeExportDocument(rules: ExportedRule[], meta: ExportMeta): string {
-  const document = { version: EXPORT_VERSION, pai: meta.pai, exportedAt: meta.exportedAt, rules }
+  const document = {
+    version: CURRENT_EXPORT_FORMAT,
+    pai: meta.pai,
+    exportedAt: meta.exportedAt,
+    rules,
+  }
   return `${JSON.stringify(document, null, 2)}\n`
 }
 
-export function parseExportDocument(json: string, options: ParseExportOptions): ExportDocument {
+const MAX_RULE_LENGTH = 500
+const MAX_CATEGORY_LENGTH = 80
+const MAX_PROBLEMS_SHOWN = 20
+
+export type ValidateExportResult =
+  | { ok: true; document: ExportDocument }
+  | { ok: false; problems: string[] }
+
+/**
+ * Strict validation of a format-2 document (after migration). Collects every
+ * problem instead of stopping at the first one; each message is prefixed
+ * with a JSON-path so multiple problems in one file can be fixed at once.
+ * Unknown extra fields, top-level or per-rule, are ignored for forward
+ * compatibility.
+ */
+export function validateExportDocument(doc: Record<string, unknown>): ValidateExportResult {
+  const problems: string[] = []
+
+  if (doc['version'] !== CURRENT_EXPORT_FORMAT) {
+    problems.push(`version: expected ${CURRENT_EXPORT_FORMAT}`)
+  }
+  if (doc['pai'] !== undefined && typeof doc['pai'] !== 'string') {
+    problems.push('pai: expected string')
+  }
+  if (doc['exportedAt'] !== undefined) {
+    const exportedAt = doc['exportedAt']
+    if (typeof exportedAt !== 'string' || Number.isNaN(Date.parse(exportedAt))) {
+      problems.push('exportedAt: expected ISO-8601 timestamp')
+    }
+  }
+
+  const rawRules = doc['rules']
+  if (!Array.isArray(rawRules)) {
+    problems.push('rules: expected array')
+    return { ok: false, problems }
+  }
+
+  const rules: ExportedRule[] = []
+  rawRules.forEach((entry, index) => {
+    const path = `rules[${index}]`
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+      problems.push(`${path}: expected object`)
+      return
+    }
+    const record = entry as Record<string, unknown>
+
+    const rawText = record['rule']
+    // A bullet is one line; line breaks inside a rule would split it.
+    const normalizedText =
+      typeof rawText === 'string' ? toLf(rawText).replace(/\n/g, ' ').trim() : undefined
+    const ruleValid =
+      normalizedText !== undefined && normalizedText !== '' && normalizedText.length <= MAX_RULE_LENGTH
+    if (!ruleValid) {
+      problems.push(`${path}.rule: expected non-empty string (max ${MAX_RULE_LENGTH} chars)`)
+    }
+
+    let category = 'General'
+    let categoryValid = true
+    const rawCategory = record['category']
+    if (rawCategory !== undefined) {
+      if (typeof rawCategory !== 'string' || rawCategory.trim().length > MAX_CATEGORY_LENGTH) {
+        categoryValid = false
+        problems.push(`${path}.category: expected string (max ${MAX_CATEGORY_LENGTH} chars)`)
+      } else {
+        category = rawCategory.trim() === '' ? 'General' : rawCategory.trim()
+      }
+    }
+
+    const scope = record['scope']
+    const scopeValid = scope === 'global' || scope === 'project'
+    if (!scopeValid) {
+      problems.push(`${path}.scope: expected "global" or "project"`)
+    }
+
+    if (ruleValid && categoryValid && scopeValid) {
+      rules.push({ rule: normalizedText as string, category, scope: scope as GuidelineScope })
+    }
+  })
+
+  if (problems.length > 0) return { ok: false, problems }
+  return { ok: true, document: { version: CURRENT_EXPORT_FORMAT, rules } }
+}
+
+export function parseExportDocument(
+  json: string,
+  options: ParseExportOptions,
+): ExportDocument & { migratedFrom?: number } {
   let parsed: unknown
   try {
     // Tolerate a byte-order mark left by Windows editors.
@@ -61,62 +151,28 @@ export function parseExportDocument(json: string, options: ParseExportOptions): 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return failParse('file is not a JSON object')
   }
-  const raw = parsed as Record<string, unknown>
-  const version = raw['version']
-  if (version === 1) {
-    // Older `.pai/rules.json` stores carry the same three fields we need.
-    return {
-      version: EXPORT_VERSION,
-      rules: parseRuleStore(json).rules.map((r) => ({
-        rule: r.rule,
-        category: r.category,
-        scope: r.scope,
-      })),
-    }
-  }
-  if (typeof version === 'number' && version > EXPORT_VERSION) {
-    const producer = typeof raw['pai'] === 'string' && raw['pai'].trim() !== '' ? raw['pai'] : 'unknown'
-    return failParse(
-      `format ${version} was produced by pai ${producer}; this pai (${options.currentPaiVersion}) supports up to format ${EXPORT_VERSION} — upgrade pai`,
-    )
-  }
-  if (version !== EXPORT_VERSION) {
-    return failParse(`unsupported version: ${String(version)} (expected ${EXPORT_VERSION})`)
-  }
-  if (!Array.isArray(raw['rules'])) {
-    return failParse('"rules" must be an array')
-  }
 
-  const rules: ExportedRule[] = []
-  for (const [index, entry] of (raw['rules'] as unknown[]).entries()) {
-    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
-      return failParse(`rule ${index + 1} is not an object`)
-    }
-    const record = entry as Record<string, unknown>
-    const text = record['rule']
-    if (typeof text !== 'string' || text.trim() === '') {
-      return failParse(`rule ${index + 1} is missing a non-empty "rule" field`)
-    }
-    const category = record['category']
-    if (category !== undefined && typeof category !== 'string') {
-      return failParse(`rule ${index + 1} has a non-string "category"`)
-    }
-    const scope = record['scope']
-    if (scope !== 'global' && scope !== 'project') {
-      return failParse(`rule ${index + 1} has an invalid "scope" (expected "global" or "project")`)
-    }
-    rules.push({
-      // A bullet is one line; line breaks inside a rule would split it.
-      rule: toLf(text).replace(/\n/g, ' ').trim(),
-      category: category === undefined || category.trim() === '' ? 'General' : category.trim(),
-      scope,
-    })
-  }
-  return { version: EXPORT_VERSION, rules }
+  const { document, migratedFrom } = migrateExport(parsed, {
+    currentPaiVersion: options.currentPaiVersion,
+  })
+  const result = validateExportDocument(document)
+  if (!result.ok) failValidation(result.problems)
+  return { ...result.document, ...(migratedFrom !== undefined ? { migratedFrom } : {}) }
 }
 
 function failParse(reason: string): never {
   throw new Error(`Invalid PAI export: ${reason}`)
+}
+
+function failValidation(problems: string[]): never {
+  const shown = problems.slice(0, MAX_PROBLEMS_SHOWN)
+  const remaining = problems.length - shown.length
+  const lines = [
+    `Invalid PAI export: ${problems.length} problem(s)`,
+    ...shown.map((problem) => `  - ${problem}`),
+    ...(remaining > 0 ? [`  - … and ${remaining} more`] : []),
+  ]
+  throw new Error(lines.join('\n'))
 }
 
 /** Where one scope's files live; built by the agent adapter, consumed by persistence. */

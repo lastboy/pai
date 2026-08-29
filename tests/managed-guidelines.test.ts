@@ -6,6 +6,7 @@ import {
   parseExportDocument,
   serializeExportDocument,
   toExportRules,
+  validateExportDocument,
 } from '../src/core/managed-guidelines.js'
 import { parseGuidelines } from '../src/core/guidelines.js'
 
@@ -183,11 +184,17 @@ describe('export document', () => {
     })
     expect(parseExportDocument(v1, opts)).toEqual({
       version: 2,
+      migratedFrom: 1,
       rules: [
         { rule: 'Ask first.', category: 'Decisions', scope: 'project' },
         { rule: 'Be brief.', category: 'General', scope: 'global' },
       ],
     })
+  })
+
+  it('does not set migratedFrom for a document that is already the current format', () => {
+    const result = parseExportDocument(serializeExportDocument(rules, meta), opts)
+    expect(result.migratedFrom).toBeUndefined()
   })
 
   it('tolerates a BOM and CRLF line endings', () => {
@@ -209,27 +216,104 @@ describe('export document', () => {
     )
   })
 
+  it('formats multiple problems as a header line plus one indented line each', () => {
+    const json = JSON.stringify({
+      version: 2,
+      pai: 42,
+      exportedAt: 'not-a-date',
+      rules: [{ rule: '', category: 'x', scope: 'global' }],
+    })
+    let message = ''
+    try {
+      parseExportDocument(json, opts)
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    expect(message).toBe(
+      [
+        'Invalid PAI export: 3 problem(s)',
+        '  - pai: expected string',
+        '  - exportedAt: expected ISO-8601 timestamp',
+        '  - rules[0].rule: expected non-empty string (max 500 chars)',
+      ].join('\n'),
+    )
+  })
+
   it('rejects malformed input with clear errors', () => {
     expect(() => parseExportDocument('nope', opts)).toThrow(/^Invalid PAI export: .*not valid JSON/)
     expect(() => parseExportDocument('[]', opts)).toThrow(/^Invalid PAI export: /)
     expect(() => parseExportDocument('{"version":0,"rules":[]}', opts)).toThrow(
-      /^Invalid PAI export: .*unsupported version/,
+      'Invalid PAI export: "version" must be a positive integer',
     )
     expect(() => parseExportDocument('{"version":2}', opts)).toThrow(
-      /^Invalid PAI export: .*"rules"/,
+      /^Invalid PAI export: 1 problem\(s\)\n {2}- rules: expected array$/,
     )
     expect(() => parseExportDocument('{"version":2,"rules":[1]}', opts)).toThrow(
-      /^Invalid PAI export: rule 1 /,
+      /rules\[0\]: expected object/,
     )
     expect(() => parseExportDocument('{"version":2,"rules":[{"category":"x"}]}', opts)).toThrow(
-      /^Invalid PAI export: rule 1 .*"rule"/,
+      /rules\[0\]\.rule: expected non-empty string \(max 500 chars\)/,
     )
     expect(() =>
       parseExportDocument(
         '{"version":2,"rules":[{"rule":"x","category":"y","scope":"team"}]}',
         opts,
       ),
-    ).toThrow(/^Invalid PAI export: rule 1 .*"scope"/)
+    ).toThrow(
+      /^Invalid PAI export: 1 problem\(s\)\n {2}- rules\[0\]\.scope: expected "global" or "project"$/,
+    )
+  })
+})
+
+describe('validateExportDocument', () => {
+  it('collects every problem, each with a JSON-path prefix', () => {
+    const result = validateExportDocument({
+      version: 1,
+      pai: 42,
+      rules: [{ rule: 'x'.repeat(501), category: 'y', scope: 'global' }],
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('expected failure')
+    expect(result.problems).toEqual([
+      'version: expected 2',
+      'pai: expected string',
+      'rules[0].rule: expected non-empty string (max 500 chars)',
+    ])
+  })
+
+  it('rejects a rule over 500 chars and a category over 80 chars', () => {
+    const result = validateExportDocument({
+      version: 2,
+      rules: [{ rule: 'x'.repeat(501), category: 'y'.repeat(81), scope: 'global' }],
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('expected failure')
+    expect(result.problems).toEqual([
+      'rules[0].rule: expected non-empty string (max 500 chars)',
+      'rules[0].category: expected string (max 80 chars)',
+    ])
+  })
+
+  it('ignores unknown top-level and per-rule fields', () => {
+    const result = validateExportDocument({
+      version: 2,
+      futureField: 'x',
+      rules: [{ rule: 'Ask first.', category: 'Decisions', scope: 'global', futureField: 'y' }],
+    })
+    expect(result).toEqual({
+      ok: true,
+      document: {
+        version: 2,
+        rules: [{ rule: 'Ask first.', category: 'Decisions', scope: 'global' }],
+      },
+    })
+  })
+
+  it('stops rule-level checks when "rules" is missing or not an array', () => {
+    expect(validateExportDocument({ version: 2 })).toEqual({
+      ok: false,
+      problems: ['rules: expected array'],
+    })
   })
 })
 
