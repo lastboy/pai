@@ -6,7 +6,8 @@ export function renderGuidelines(groups: GuidelineGroup[]): string[] {
   const lines: string[] = ['PAI — Guidelines']
   for (const group of groups) {
     lines.push('')
-    lines.push(`${group.scope === 'global' ? 'Global' : 'Project'} (${group.path})`)
+    const scope = group.scope === 'global' ? 'Global' : 'Project'
+    lines.push(`${group.managed ? `${scope} — PAI managed` : scope} (${group.path})`)
     if (group.guidelines.length === 0) {
       lines.push('  (no guidelines found)')
       continue

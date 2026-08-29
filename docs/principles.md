@@ -3,9 +3,10 @@
 ## Principles
 
 1. **Read-only toward agents' data.** PAI never modifies coding-agent files
-   (transcripts, configs, CLAUDE.md). PAI writes only to its own store
-   (`.pai/` in a project) — and to agent guidance files only as an explicit,
-   user-approved sync feature (future).
+   (transcripts, configs, CLAUDE.md). PAI writes only its own `CLAUDE.pai.md`
+   next to each CLAUDE.md, plus a single pointer line (`@CLAUDE.pai.md`) in
+   CLAUDE.md so the agent reads it — it never edits hand-written rules.
+   `.pai/` is reserved for PAI's own metadata.
 2. **Approval gates knowledge.** Nothing becomes a stored rule without the
    user approving it. Every stored or reported item carries evidence: the
    user's actual words, session id, timestamp.

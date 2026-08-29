@@ -58,7 +58,8 @@ pai review
 
 Shows your guidelines from the CLAUDE.md files that apply to the current
 folder — global (`~/.claude/CLAUDE.md`) and project (`CLAUDE.md`,
-`CLAUDE.local.md`) — grouped by their markdown headings.
+`CLAUDE.local.md`) — plus the PAI-managed `CLAUDE.pai.md` next to each, all
+grouped by their markdown headings. Managed files are labeled `PAI managed`.
 
 | Option | Effect |
 |---|---|
@@ -77,7 +78,13 @@ Search matches word starts, so `--search ask` finds "Ask me before…" but not
 
 ### `pai export`
 
-Exports PAI's own rule store as portable, versioned JSON.
+Exports the same rules `pai rules` shows — from `CLAUDE.md` and
+`CLAUDE.pai.md`, global then project — as portable, versioned JSON.
+`CLAUDE.local.md` is per-machine and is not exported.
+
+```json
+{ "version": 2, "rules": [ { "rule": "…", "category": "…", "scope": "global" } ] }
+```
 
 | Option | Effect |
 |---|---|
@@ -92,16 +99,25 @@ pai export --scope global --out mine.json   # only user-level rules
 ### `pai import <file>`
 
 Merges a previously exported file into this machine. Rules carry their own
-scope, so global rules land in the global store and project rules in the
-current project's store — no flag needed.
+scope: global rules go to `~/.claude/CLAUDE.pai.md`, project rules to
+`<project>/CLAUDE.pai.md` — no flag needed. For each scope PAI:
 
-The merge is **non-destructive**: new rules are added, rules you already have
-gain any new evidence, and nothing is overwritten or removed. Re-importing the
-same file changes nothing.
+1. makes sure `CLAUDE.md` exists and contains the import line `@CLAUDE.pai.md`
+   (created with only that line if missing; the line is appended in place if
+   absent, so a symlinked CLAUDE.md stays a symlink; nothing else in the file
+   is touched);
+2. adds the rules that `CLAUDE.pai.md` does not have yet, under their category
+   headings, keeping everything already there exactly as it is.
+
+The merge is **non-destructive** and idempotent: nothing is overwritten or
+removed, and re-importing the same file adds nothing. Rule identity is the
+normalized text (case, punctuation, whitespace and line endings ignored).
+Hand-written `CLAUDE.md` rules are never used for deduplication — only
+`CLAUDE.pai.md` is. Files from the older `version: 1` store format are accepted.
 
 | Option | Effect |
 |---|---|
-| `--dry-run` | report what would change without writing |
+| `--dry-run` | report what would change ("would add …") without writing |
 
 ```bash
 pai import mine.json --dry-run
@@ -110,12 +126,13 @@ pai import mine.json
 
 Invalid or unsupported files fail with a clear message and a non-zero exit code.
 
-**Cross-platform.** A store exported on macOS or Linux imports on Windows and
-back. Stores contain no filesystem paths, so nothing is machine-specific, and
+**Cross-platform.** A file exported on macOS or Linux imports on Windows and
+back. Exports contain no filesystem paths, so nothing is machine-specific, and
 import accepts the encodings Windows tooling produces: UTF-8, UTF-8 with a BOM
 (Notepad, `Set-Content`) and UTF-16 with a BOM (PowerShell 5.1's `>` redirect).
 Line endings are normalized, so the same rule written on Windows and on
-macOS/Linux merges as one instead of duplicating.
+macOS/Linux counts as one instead of duplicating; `CLAUDE.pai.md` is always
+written as UTF-8 with LF line endings.
 
 ### `pai experiment …`
 
@@ -134,26 +151,29 @@ Default model: `qwen2.5:14b`.
 
 ## Where PAI stores things
 
-| Path | Contents |
-|---|---|
-| `~/.pai/rules.json` | your user-level rules |
-| `<project>/.pai/rules.json` | rules scoped to that project |
+Your rules have one source of truth: the CLAUDE.md family of files the coding
+agent already reads.
 
-The store is agent-neutral, versioned (`version: 1`), and portable: rule
-identity comes from the rule text, so the same rule learned on two machines
-merges cleanly instead of duplicating. Each rule keeps its category, scope,
-source (`learned` or `manual`) and evidence — your actual words, with session id
-and timestamp.
+| Path | Contents | Who writes it |
+|---|---|---|
+| `~/.claude/CLAUDE.md` | your hand-written global rules | you |
+| `~/.claude/CLAUDE.pai.md` | global rules PAI added | PAI |
+| `<project>/CLAUDE.md` | hand-written project rules | you |
+| `<project>/CLAUDE.pai.md` | project rules PAI added | PAI |
+| `~/.pai/`, `<project>/.pai/` | reserved for PAI metadata (future) | PAI |
 
-PAI **never writes** to `~/.claude/` or to any CLAUDE.md file.
+PAI never merges into a hand-written CLAUDE.md. The only change it makes there
+is adding the single line `@CLAUDE.pai.md` — Claude Code's native import — so
+the agent reads the managed file too. Rule identity comes from the rule text,
+so the same rule imported twice, or written on two machines, counts once.
 
 ## What PAI reads
 
 | Path | Used for |
 |---|---|
 | `~/.claude/projects/<encoded-cwd>/*.jsonl` | session transcripts (read-only) |
-| `~/.claude/CLAUDE.md` | global guidelines |
-| `<project>/CLAUDE.md`, `CLAUDE.local.md` | project guidelines |
+| `~/.claude/CLAUDE.md`, `CLAUDE.pai.md` | global guidelines |
+| `<project>/CLAUDE.md`, `CLAUDE.local.md`, `CLAUDE.pai.md` | project guidelines |
 
 The encoded folder name is the project path with every non-alphanumeric
 character replaced by `-`.
@@ -163,7 +183,7 @@ character replaced by `-`.
 ```
 src/core/          agent-independent logic (sessions, corrections, rules, review)
 src/adapters/      per-agent integration — currently only claude/
-src/persistence/   PAI's own store on disk
+src/persistence/   file I/O — CLAUDE.pai.md, text decoding, the .pai/ store
 src/experiments/   local-LLM experiments (Ollama, optional)
 src/cli/           command wiring and rendering
 tests/             vitest suites and sanitized fixtures

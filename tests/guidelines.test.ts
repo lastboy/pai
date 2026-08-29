@@ -2,7 +2,13 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { findGuidelineFiles, parseGuidelines } from '../src/adapters/claude/guidelines.js'
+import {
+  POINTER_LINE,
+  findExportableGuidelineFiles,
+  findGuidelineFiles,
+  managedGuidelinePath,
+  parseGuidelines,
+} from '../src/adapters/claude/guidelines.js'
 import { renderGuidelines } from '../src/cli/render.js'
 
 const markdown = `# How We Work
@@ -56,8 +62,8 @@ describe('findGuidelineFiles', () => {
 
     const files = findGuidelineFiles(project, home)
     expect(files).toEqual([
-      { path: join(home, '.claude', 'CLAUDE.md'), scope: 'global' },
-      { path: join(project, 'CLAUDE.md'), scope: 'project' },
+      { path: join(home, '.claude', 'CLAUDE.md'), scope: 'global', managed: false },
+      { path: join(project, 'CLAUDE.md'), scope: 'project', managed: false },
     ])
   })
 
@@ -65,6 +71,40 @@ describe('findGuidelineFiles', () => {
     const home = mkdtempSync(join(tmpdir(), 'pai-home-'))
     const project = mkdtempSync(join(tmpdir(), 'pai-proj-'))
     expect(findGuidelineFiles(project, home)).toEqual([])
+  })
+
+  it('includes PAI-managed files after the hand-written ones of each scope', () => {
+    const home = mkdtempSync(join(tmpdir(), 'pai-home-'))
+    const project = mkdtempSync(join(tmpdir(), 'pai-proj-'))
+    mkdirSync(join(home, '.claude'), { recursive: true })
+    writeFileSync(join(home, '.claude', 'CLAUDE.pai.md'), '- managed global\n')
+    writeFileSync(join(home, '.claude', 'CLAUDE.md'), '- global rule\n')
+    writeFileSync(join(project, 'CLAUDE.pai.md'), '- managed project\n')
+    writeFileSync(join(project, 'CLAUDE.local.md'), '- local rule\n')
+    writeFileSync(join(project, 'CLAUDE.md'), '- project rule\n')
+
+    expect(findGuidelineFiles(project, home)).toEqual([
+      { path: join(home, '.claude', 'CLAUDE.md'), scope: 'global', managed: false },
+      { path: join(home, '.claude', 'CLAUDE.pai.md'), scope: 'global', managed: true },
+      { path: join(project, 'CLAUDE.md'), scope: 'project', managed: false },
+      { path: join(project, 'CLAUDE.local.md'), scope: 'project', managed: false },
+      { path: join(project, 'CLAUDE.pai.md'), scope: 'project', managed: true },
+    ])
+    expect(managedGuidelinePath(project)).toBe(join(project, 'CLAUDE.pai.md'))
+    expect(POINTER_LINE).toBe('@CLAUDE.pai.md')
+  })
+
+  it('excludes CLAUDE.local.md from exportable files', () => {
+    const home = mkdtempSync(join(tmpdir(), 'pai-home-'))
+    const project = mkdtempSync(join(tmpdir(), 'pai-proj-'))
+    writeFileSync(join(project, 'CLAUDE.md'), '- project rule\n')
+    writeFileSync(join(project, 'CLAUDE.local.md'), '- local rule\n')
+    writeFileSync(join(project, 'CLAUDE.pai.md'), '- managed project\n')
+
+    expect(findExportableGuidelineFiles(project, home).map((f) => f.path)).toEqual([
+      join(project, 'CLAUDE.md'),
+      join(project, 'CLAUDE.pai.md'),
+    ])
   })
 })
 
@@ -88,5 +128,20 @@ describe('renderGuidelines', () => {
     expect(output).toContain('• One step at a time.')
     expect(output).toContain('Communication')
     expect(output).toContain('(no guidelines found)')
+  })
+
+  it('labels PAI-managed files', () => {
+    const output = renderGuidelines([
+      {
+        scope: 'global',
+        path: '/home/.claude/CLAUDE.pai.md',
+        managed: true,
+        guidelines: [{ category: 'Decisions', text: 'Ask first.' }],
+      },
+      { scope: 'project', path: '/proj/CLAUDE.pai.md', managed: true, guidelines: [] },
+    ])
+
+    expect(output).toContain('Global — PAI managed (/home/.claude/CLAUDE.pai.md)')
+    expect(output).toContain('Project — PAI managed (/proj/CLAUDE.pai.md)')
   })
 })

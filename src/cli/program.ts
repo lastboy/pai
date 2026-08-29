@@ -16,21 +16,23 @@ import {
 } from '../experiments/correction-analysis.js'
 import { ollamaGenerate } from '../experiments/ollama.js'
 import { buildDistillPrompt, parseDistillResponse } from '../experiments/rule-distillation.js'
-import { findGuidelineFiles, parseGuidelines } from '../adapters/claude/guidelines.js'
+import {
+  findExportableGuidelineFiles,
+  findGuidelineFiles,
+  guidelineDir,
+  managedImportTarget,
+} from '../adapters/claude/guidelines.js'
 import { filterGuidelineGroups } from '../core/guidelines.js'
 import {
-  emptyStore,
-  mergeStores,
-  parseRuleStore,
-  serializeRuleStore,
-  type RuleStore,
-} from '../core/rule-store.js'
+  parseExportDocument,
+  serializeExportDocument,
+  toExportRules,
+  type ExportDocument,
+} from '../core/managed-guidelines.js'
 import {
-  globalStorePath,
-  projectStorePath,
-  readStore,
-  writeStore,
-} from '../persistence/rule-store-files.js'
+  importManagedGuidelines,
+  readGuidelineGroups,
+} from '../persistence/managed-guideline-files.js'
 import { decodeTextFile } from '../persistence/text-file.js'
 import { parseSelection, renderGuidelines, renderReview, renderSessionList } from './render.js'
 
@@ -115,18 +117,11 @@ export function createProgram(out: OutputWriter): Command {
   program
     .command('rules')
     .description('Show your guidelines from CLAUDE.md files, categorized')
-    .option('--global', 'only global rules (~/.claude/CLAUDE.md)')
-    .option('--project', 'only project rules (CLAUDE.md, CLAUDE.local.md)')
+    .option('--global', 'only global rules (~/.claude/CLAUDE.md, CLAUDE.pai.md)')
+    .option('--project', 'only project rules (CLAUDE.md, CLAUDE.local.md, CLAUDE.pai.md)')
     .option('--search <text>', 'only rules whose text or category starts a word with <text>')
-    .action(async (options: { global?: boolean; project?: boolean; search?: string }) => {
-      const files = findGuidelineFiles(process.cwd())
-      const groups = await Promise.all(
-        files.map(async (file) => ({
-          scope: file.scope,
-          path: file.path,
-          guidelines: parseGuidelines(decodeTextFile(await readFile(file.path))),
-        })),
-      )
+    .action((options: { global?: boolean; project?: boolean; search?: string }) => {
+      const groups = readGuidelineGroups(findGuidelineFiles(process.cwd()))
       // --global and --project together = no scope filter (same as neither).
       const scope =
         options.global && !options.project
@@ -144,7 +139,7 @@ export function createProgram(out: OutputWriter): Command {
 
   program
     .command('export')
-    .description('Export PAI rules to a portable JSON file (or stdout)')
+    .description('Export your rules (CLAUDE.md + CLAUDE.pai.md) to a portable JSON file (or stdout)')
     .option('--out <file>', 'write to this file instead of stdout')
     .option('--scope <scope>', 'export only "global" or "project" rules')
     .action((options: { out?: string; scope?: string }) => {
@@ -154,21 +149,18 @@ export function createProgram(out: OutputWriter): Command {
         return
       }
       try {
-        const global = readStore(globalStorePath())
-        const project = readStore(projectStorePath(process.cwd()))
-        const combined: RuleStore = {
-          ...emptyStore(),
-          rules: [...global.rules, ...project.rules].filter(
-            (rule) => options.scope === undefined || rule.scope === options.scope,
-          ),
-        }
-        const json = serializeRuleStore(combined)
+        // Global files come first, so the output order is global → project.
+        const files = findExportableGuidelineFiles(process.cwd()).filter(
+          (file) => options.scope === undefined || file.scope === options.scope,
+        )
+        const rules = toExportRules(readGuidelineGroups(files))
+        const json = serializeExportDocument(rules)
         if (options.out === undefined) {
           out(json.trimEnd())
           return
         }
         writeFileSync(options.out, json, 'utf8')
-        out(`Exported ${combined.rules.length} rule(s) to ${options.out}`)
+        out(`Exported ${rules.length} rule(s) to ${options.out}`)
       } catch (error) {
         out(`Export failed: ${describeError(error)}`)
         process.exitCode = 1
@@ -178,31 +170,36 @@ export function createProgram(out: OutputWriter): Command {
   program
     .command('import')
     .argument('<file>', 'JSON file previously produced by "pai export"')
-    .description('Merge rules from a file into this machine (never overwrites)')
+    .description('Merge rules from a file into CLAUDE.pai.md on this machine (never overwrites)')
     .option('--dry-run', 'show what would change without writing')
     .action(async (file: string, options: { dryRun?: boolean }) => {
-      let incoming: RuleStore
+      let incoming: ExportDocument
       try {
-        incoming = parseRuleStore(decodeTextFile(await readFile(file)))
+        incoming = parseExportDocument(decodeTextFile(await readFile(file)))
       } catch (error) {
         out(`Could not read ${file}: ${describeError(error)}`)
         process.exitCode = 1
         return
       }
 
-      const targets = [
-        { scope: 'global' as const, path: globalStorePath() },
-        { scope: 'project' as const, path: projectStorePath(process.cwd()) },
-      ]
       try {
-        for (const target of targets) {
-          const rules = incoming.rules.filter((rule) => rule.scope === target.scope)
+        for (const scope of ['global', 'project'] as const) {
+          const rules = incoming.rules.filter((rule) => rule.scope === scope)
           if (rules.length === 0) continue
-          const result = mergeStores(readStore(target.path), { ...emptyStore(), rules })
-          if (!options.dryRun) writeStore(target.path, result.store)
-          out(
-            `${target.scope}: ${result.added} added, ${result.merged} updated with new evidence, ${result.store.rules.length} total → ${target.path}`,
-          )
+          const dir = guidelineDir(scope, process.cwd())
+          out(`Target (${scope}): ${dir}`)
+          const result = importManagedGuidelines(managedImportTarget(dir), rules, {
+            dryRun: options.dryRun,
+          })
+          const dry = options.dryRun === true
+          if (result.pointer === 'created') {
+            out(dry ? '  would create CLAUDE.md with pointer' : '  created CLAUDE.md with pointer')
+          }
+          if (result.pointer === 'appended') {
+            out(dry ? '  would add pointer line to CLAUDE.md' : '  added pointer line to CLAUDE.md')
+          }
+          const added = dry ? `would add ${result.added} rule(s)` : `${result.added} added`
+          out(`${scope}: ${added}, ${result.existing} already present → ${result.managedPath}`)
         }
       } catch (error) {
         out(`Import failed: ${describeError(error)}`)

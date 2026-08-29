@@ -1,0 +1,219 @@
+import { describe, expect, it } from 'vitest'
+import {
+  MANAGED_HEADER,
+  ensurePointer,
+  mergeManagedMarkdown,
+  parseExportDocument,
+  serializeExportDocument,
+  toExportRules,
+} from '../src/core/managed-guidelines.js'
+import { parseGuidelines } from '../src/core/guidelines.js'
+
+const POINTER = '@CLAUDE.pai.md'
+
+describe('mergeManagedMarkdown', () => {
+  it('creates a new file with the header and rules under their headings', () => {
+    const result = mergeManagedMarkdown(undefined, [
+      { rule: 'Keep answers short.', category: 'Communication' },
+      { rule: 'Ask before deciding.', category: 'Decisions' },
+      { rule: 'Do not add background.', category: 'Communication' },
+    ])
+
+    expect(result.added).toBe(3)
+    expect(result.existing).toBe(0)
+    expect(result.markdown).toBe(
+      `${MANAGED_HEADER}\n\n## Communication\n- Keep answers short.\n- Do not add background.\n\n## Decisions\n- Ask before deciding.\n`,
+    )
+    expect(result.markdown.startsWith('﻿')).toBe(false)
+  })
+
+  it('appends under an existing heading and creates missing headings at the end', () => {
+    const existing = `${MANAGED_HEADER}\n\n## Communication\n- Keep answers short.\n\n## Git\n- Never force-push.\n`
+    const result = mergeManagedMarkdown(existing, [
+      { rule: 'Do not add background.', category: 'Communication' },
+      { rule: 'Ask before deciding.', category: 'Decisions' },
+    ])
+
+    expect(result.added).toBe(2)
+    expect(result.markdown).toBe(
+      `${MANAGED_HEADER}\n\n## Communication\n- Keep answers short.\n- Do not add background.\n\n## Git\n- Never force-push.\n\n## Decisions\n- Ask before deciding.\n`,
+    )
+  })
+
+  it('preserves prose and order exactly', () => {
+    const existing = `# Title\n\nSome prose that is not a rule.\n\n## Communication\n- Keep answers short.\n\nMore prose inside the section.\n\n## Git\n- Never force-push.\n`
+    const result = mergeManagedMarkdown(existing, [
+      { rule: 'Do not add background.', category: 'Communication' },
+    ])
+
+    expect(result.markdown).toBe(
+      `# Title\n\nSome prose that is not a rule.\n\n## Communication\n- Keep answers short.\n\nMore prose inside the section.\n- Do not add background.\n\n## Git\n- Never force-push.\n`,
+    )
+    expect(parseGuidelines(result.markdown)).toEqual([
+      { category: 'Communication', text: 'Keep answers short.' },
+      { category: 'Communication', text: 'Do not add background.' },
+      { category: 'Git', text: 'Never force-push.' },
+    ])
+  })
+
+  it('treats case, punctuation, whitespace and CRLF variants as the same rule', () => {
+    const existing = `## Communication\n- Keep answers short.\n`
+    const result = mergeManagedMarkdown(existing, [
+      { rule: 'keep answers short', category: 'Communication' },
+      { rule: 'Keep  answers, short!', category: 'Other' },
+      { rule: 'Keep answers\r\nshort.', category: 'Communication' },
+    ])
+
+    expect(result.added).toBe(0)
+    expect(result.existing).toBe(3)
+    expect(result.markdown).toBe(existing)
+  })
+
+  it('does not add the same incoming rule twice', () => {
+    const result = mergeManagedMarkdown(undefined, [
+      { rule: 'Ask first.', category: 'Decisions' },
+      { rule: 'ask first', category: 'Decisions' },
+    ])
+    expect(result.added).toBe(1)
+    expect(result.existing).toBe(1)
+  })
+
+  it('renders the General category as a heading', () => {
+    const result = mergeManagedMarkdown(undefined, [{ rule: 'Be brief.', category: 'General' }])
+    expect(result.markdown).toBe(`${MANAGED_HEADER}\n\n## General\n- Be brief.\n`)
+  })
+
+  it('normalizes an existing CRLF file to LF when it changes', () => {
+    const result = mergeManagedMarkdown('## Git\r\n- Never force-push.\r\n', [
+      { rule: 'Ask first.', category: 'Git' },
+    ])
+    expect(result.markdown).toBe('## Git\n- Never force-push.\n- Ask first.\n')
+  })
+})
+
+describe('ensurePointer', () => {
+  it('creates CLAUDE.md with only the pointer when missing', () => {
+    expect(ensurePointer(undefined, POINTER)).toEqual({
+      suffix: `${POINTER}\n`,
+      action: 'created',
+    })
+  })
+
+  it('leaves CLAUDE.md unchanged when the pointer line is present', () => {
+    const content = `# Rules\n\n- Ask first.\n\n  ${POINTER}  \n`
+    expect(ensurePointer(content, POINTER)).toEqual({ suffix: '', action: 'unchanged' })
+  })
+
+  it('returns a suffix that leaves exactly one blank line before the pointer', () => {
+    expect(ensurePointer('# Rules\n- Ask first.\n', POINTER)).toEqual({
+      suffix: `\n${POINTER}\n`,
+      action: 'appended',
+    })
+    expect(ensurePointer('# Rules\n- Ask first.', POINTER).suffix).toBe(`\n\n${POINTER}\n`)
+    expect(ensurePointer('# Rules\n- Ask first.\r\n', POINTER).suffix).toBe(`\n${POINTER}\n`)
+    expect(ensurePointer('# Rules\n- Ask first.\n\n', POINTER).suffix).toBe(`${POINTER}\n`)
+  })
+
+  it('does not count the pointer when it is embedded in other text', () => {
+    const result = ensurePointer(`See ${POINTER} for PAI rules.\n`, POINTER)
+    expect(result).toEqual({ suffix: `\n${POINTER}\n`, action: 'appended' })
+  })
+
+  it('appends just the pointer to an empty or whitespace-only file', () => {
+    expect(ensurePointer('', POINTER).suffix).toBe(`${POINTER}\n`)
+    expect(ensurePointer('\n\n', POINTER).suffix).toBe(`${POINTER}\n`)
+  })
+})
+
+describe('export document', () => {
+  const rules = [
+    { rule: 'Keep answers short.', category: 'Communication', scope: 'global' as const },
+    { rule: 'Never force-push.', category: 'Git', scope: 'project' as const },
+  ]
+
+  it('serializes to version 2 with two-space indent and a trailing newline', () => {
+    const json = serializeExportDocument(rules)
+    expect(json).toBe(`${JSON.stringify({ version: 2, rules }, null, 2)}\n`)
+    expect(json.startsWith('﻿')).toBe(false)
+  })
+
+  it('parses a valid version 2 document', () => {
+    expect(parseExportDocument(serializeExportDocument(rules))).toEqual({ version: 2, rules })
+  })
+
+  it('accepts a version 1 rule store and maps rule, category and scope', () => {
+    const v1 = JSON.stringify({
+      version: 1,
+      rules: [
+        {
+          id: 'x',
+          rule: 'Ask first.',
+          category: 'Decisions',
+          scope: 'project',
+          source: 'manual',
+          evidence: [{ text: 'ask me first' }],
+        },
+        { rule: 'Be brief.' },
+      ],
+    })
+    expect(parseExportDocument(v1)).toEqual({
+      version: 2,
+      rules: [
+        { rule: 'Ask first.', category: 'Decisions', scope: 'project' },
+        { rule: 'Be brief.', category: 'General', scope: 'global' },
+      ],
+    })
+  })
+
+  it('tolerates a BOM and CRLF line endings', () => {
+    const windows = `﻿${serializeExportDocument(rules).replace(/\n/g, '\r\n')}`
+    expect(parseExportDocument(windows)).toEqual({ version: 2, rules })
+  })
+
+  it('rejects malformed input with clear errors', () => {
+    expect(() => parseExportDocument('nope')).toThrow(/^Invalid PAI export: .*not valid JSON/)
+    expect(() => parseExportDocument('[]')).toThrow(/^Invalid PAI export: /)
+    expect(() => parseExportDocument('{"version":3,"rules":[]}')).toThrow(
+      /^Invalid PAI export: .*version/,
+    )
+    expect(() => parseExportDocument('{"version":2}')).toThrow(/^Invalid PAI export: .*"rules"/)
+    expect(() => parseExportDocument('{"version":2,"rules":[1]}')).toThrow(
+      /^Invalid PAI export: rule 1 /,
+    )
+    expect(() => parseExportDocument('{"version":2,"rules":[{"category":"x"}]}')).toThrow(
+      /^Invalid PAI export: rule 1 .*"rule"/,
+    )
+    expect(() =>
+      parseExportDocument('{"version":2,"rules":[{"rule":"x","category":"y","scope":"team"}]}'),
+    ).toThrow(/^Invalid PAI export: rule 1 .*"scope"/)
+  })
+})
+
+describe('toExportRules', () => {
+  it('flattens groups in file order and document order', () => {
+    expect(
+      toExportRules([
+        {
+          scope: 'global',
+          path: '/h/.claude/CLAUDE.md',
+          guidelines: [{ category: 'Communication', text: 'Keep answers short.' }],
+        },
+        {
+          scope: 'global',
+          path: '/h/.claude/CLAUDE.pai.md',
+          managed: true,
+          guidelines: [{ category: 'Decisions', text: 'Ask first.' }],
+        },
+        {
+          scope: 'project',
+          path: '/p/CLAUDE.md',
+          guidelines: [{ category: 'Git', text: 'Never force-push.' }],
+        },
+      ]),
+    ).toEqual([
+      { rule: 'Keep answers short.', category: 'Communication', scope: 'global' },
+      { rule: 'Ask first.', category: 'Decisions', scope: 'global' },
+      { rule: 'Never force-push.', category: 'Git', scope: 'project' },
+    ])
+  })
+})
