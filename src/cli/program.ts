@@ -76,7 +76,7 @@ function describeError(error: unknown): string {
 }
 
 // Same relative depth from src/cli and dist/cli.
-function packageVersion(): string {
+export function packageVersion(): string {
   const pkg = JSON.parse(
     readFileSync(join(import.meta.dirname, '..', '..', 'package.json'), 'utf8'),
   ) as { version?: string }
@@ -154,7 +154,10 @@ export function createProgram(out: OutputWriter): Command {
           (file) => options.scope === undefined || file.scope === options.scope,
         )
         const rules = toExportRules(readGuidelineGroups(files))
-        const json = serializeExportDocument(rules)
+        const json = serializeExportDocument(rules, {
+          pai: packageVersion(),
+          exportedAt: new Date().toISOString(),
+        })
         if (options.out === undefined) {
           out(json.trimEnd())
           return
@@ -175,7 +178,9 @@ export function createProgram(out: OutputWriter): Command {
     .action(async (file: string, options: { dryRun?: boolean }) => {
       let incoming: ExportDocument
       try {
-        incoming = parseExportDocument(decodeTextFile(await readFile(file)))
+        incoming = parseExportDocument(decodeTextFile(await readFile(file)), {
+          currentPaiVersion: packageVersion(),
+        })
       } catch (error) {
         out(`Could not read ${file}: ${describeError(error)}`)
         process.exitCode = 1

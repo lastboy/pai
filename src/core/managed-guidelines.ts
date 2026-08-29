@@ -18,6 +18,17 @@ export interface ExportDocument {
   rules: ExportedRule[]
 }
 
+/** Metadata the CLI attaches when writing an export file. */
+export interface ExportMeta {
+  pai: string
+  exportedAt: string
+}
+
+/** Supplied by the CLI so parsing can report which format versions it supports. */
+export interface ParseExportOptions {
+  currentPaiVersion: string
+}
+
 const EXPORT_VERSION = 2
 
 export const MANAGED_HEADER =
@@ -34,12 +45,12 @@ export function toExportRules(groups: GuidelineGroup[]): ExportedRule[] {
   )
 }
 
-export function serializeExportDocument(rules: ExportedRule[]): string {
-  const document: ExportDocument = { version: EXPORT_VERSION, rules }
+export function serializeExportDocument(rules: ExportedRule[], meta: ExportMeta): string {
+  const document = { version: EXPORT_VERSION, pai: meta.pai, exportedAt: meta.exportedAt, rules }
   return `${JSON.stringify(document, null, 2)}\n`
 }
 
-export function parseExportDocument(json: string): ExportDocument {
+export function parseExportDocument(json: string, options: ParseExportOptions): ExportDocument {
   let parsed: unknown
   try {
     // Tolerate a byte-order mark left by Windows editors.
@@ -51,7 +62,8 @@ export function parseExportDocument(json: string): ExportDocument {
     return failParse('file is not a JSON object')
   }
   const raw = parsed as Record<string, unknown>
-  if (raw['version'] === 1) {
+  const version = raw['version']
+  if (version === 1) {
     // Older `.pai/rules.json` stores carry the same three fields we need.
     return {
       version: EXPORT_VERSION,
@@ -62,10 +74,14 @@ export function parseExportDocument(json: string): ExportDocument {
       })),
     }
   }
-  if (raw['version'] !== EXPORT_VERSION) {
+  if (typeof version === 'number' && version > EXPORT_VERSION) {
+    const producer = typeof raw['pai'] === 'string' && raw['pai'].trim() !== '' ? raw['pai'] : 'unknown'
     return failParse(
-      `unsupported version: ${String(raw['version'])} (expected ${EXPORT_VERSION})`,
+      `format ${version} was produced by pai ${producer}; this pai (${options.currentPaiVersion}) supports up to format ${EXPORT_VERSION} — upgrade pai`,
     )
+  }
+  if (version !== EXPORT_VERSION) {
+    return failParse(`unsupported version: ${String(version)} (expected ${EXPORT_VERSION})`)
   }
   if (!Array.isArray(raw['rules'])) {
     return failParse('"rules" must be an array')

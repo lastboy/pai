@@ -83,8 +83,18 @@ Exports the same rules `pai rules` shows — from `CLAUDE.md` and
 `CLAUDE.local.md` is per-machine and is not exported.
 
 ```json
-{ "version": 2, "rules": [ { "rule": "…", "category": "…", "scope": "global" } ] }
+{
+  "version": 2,
+  "pai": "0.3.1",
+  "exportedAt": "2026-08-29T12:00:00.000Z",
+  "rules": [ { "rule": "…", "category": "…", "scope": "global" } ]
+}
 ```
+
+`version` is the export format (for compatibility checks), `pai` is the PAI
+version that produced the file, and `exportedAt` is when it was written;
+files from a newer format than this `pai` supports are rejected with an
+upgrade hint.
 
 | Option | Effect |
 |---|---|
@@ -211,6 +221,17 @@ repository.
 Working today: `status`, `review`, `rules`, `export`, `import`, and the two
 experiments.
 
-Next: `pai learn` — scan sessions, distill candidate rules, approve or reject
-them interactively, and store the approved ones. Then auditing sessions against
-stored rules (which rules the agent actually violated, with evidence).
+Next: see [Roadmap](#roadmap).
+
+## Roadmap
+
+- **`pai learn`** — scan sessions, distill candidate rules with a local model, approve/reject/edit interactively, write approved rules to `CLAUDE.pai.md`.
+- **Compliance audit** — check sessions against your rules and report violations with evidence (which rule, how often, your own words) — the "is the agent following my guidance" measure.
+- **Trends** — violations over time, before/after a rule was added, and comparison across models/configurations.
+- **Cross-project promotion** — rules that keep appearing in several projects get proposed as global rules.
+- **Better session review** — active time instead of wall-clock duration, filtering out headless/automation sessions.
+- **Long-list UX** — category summaries with counts, `--category`, an interactive picker.
+- **More agents** — Codex CLI adapter (`AGENTS.md`); the core stays agent-independent.
+- **Optional integrations, only if needed** — Claude Code hooks for real-time capture; MCP so the agent can ask PAI about rules.
+
+Order is not a commitment; each item ships as its own small, tested step.

@@ -130,15 +130,40 @@ describe('export document', () => {
     { rule: 'Keep answers short.', category: 'Communication', scope: 'global' as const },
     { rule: 'Never force-push.', category: 'Git', scope: 'project' as const },
   ]
+  const meta = { pai: '0.3.1', exportedAt: '2026-08-29T12:00:00.000Z' }
+  const opts = { currentPaiVersion: '0.3.1' }
 
   it('serializes to version 2 with two-space indent and a trailing newline', () => {
-    const json = serializeExportDocument(rules)
-    expect(json).toBe(`${JSON.stringify({ version: 2, rules }, null, 2)}\n`)
+    const json = serializeExportDocument(rules, meta)
+    expect(json).toBe(
+      `${JSON.stringify({ version: 2, pai: meta.pai, exportedAt: meta.exportedAt, rules }, null, 2)}\n`,
+    )
     expect(json.startsWith('﻿')).toBe(false)
   })
 
+  it('includes version, pai and exportedAt as the header, in that order', () => {
+    const json = serializeExportDocument(rules, meta)
+    const parsed = JSON.parse(json) as Record<string, unknown>
+    expect(Object.keys(parsed)).toEqual(['version', 'pai', 'exportedAt', 'rules'])
+    expect(parsed['pai']).toBe(meta.pai)
+    expect(parsed['exportedAt']).toBe(meta.exportedAt)
+  })
+
   it('parses a valid version 2 document', () => {
-    expect(parseExportDocument(serializeExportDocument(rules))).toEqual({ version: 2, rules })
+    expect(parseExportDocument(serializeExportDocument(rules, meta), opts)).toEqual({
+      version: 2,
+      rules,
+    })
+  })
+
+  it('parses a version 2 document without pai or exportedAt', () => {
+    const json = `${JSON.stringify({ version: 2, rules }, null, 2)}\n`
+    expect(parseExportDocument(json, opts)).toEqual({ version: 2, rules })
+  })
+
+  it('ignores unknown extra top-level fields', () => {
+    const json = `${JSON.stringify({ version: 2, rules, futureField: 'x' }, null, 2)}\n`
+    expect(parseExportDocument(json, opts)).toEqual({ version: 2, rules })
   })
 
   it('accepts a version 1 rule store and maps rule, category and scope', () => {
@@ -156,7 +181,7 @@ describe('export document', () => {
         { rule: 'Be brief.' },
       ],
     })
-    expect(parseExportDocument(v1)).toEqual({
+    expect(parseExportDocument(v1, opts)).toEqual({
       version: 2,
       rules: [
         { rule: 'Ask first.', category: 'Decisions', scope: 'project' },
@@ -166,25 +191,44 @@ describe('export document', () => {
   })
 
   it('tolerates a BOM and CRLF line endings', () => {
-    const windows = `﻿${serializeExportDocument(rules).replace(/\n/g, '\r\n')}`
-    expect(parseExportDocument(windows)).toEqual({ version: 2, rules })
+    const windows = `﻿${serializeExportDocument(rules, meta).replace(/\n/g, '\r\n')}`
+    expect(parseExportDocument(windows, opts)).toEqual({ version: 2, rules })
+  })
+
+  it('rejects a newer format with an upgrade message naming the producer version', () => {
+    const json = JSON.stringify({ version: 3, pai: '0.9.0', rules: [] })
+    expect(() => parseExportDocument(json, { currentPaiVersion: '0.3.1' })).toThrow(
+      'Invalid PAI export: format 3 was produced by pai 0.9.0; this pai (0.3.1) supports up to format 2 — upgrade pai',
+    )
+  })
+
+  it('says "pai unknown" when the newer format has no pai field', () => {
+    const json = JSON.stringify({ version: 3, rules: [] })
+    expect(() => parseExportDocument(json, { currentPaiVersion: '0.3.1' })).toThrow(
+      'Invalid PAI export: format 3 was produced by pai unknown; this pai (0.3.1) supports up to format 2 — upgrade pai',
+    )
   })
 
   it('rejects malformed input with clear errors', () => {
-    expect(() => parseExportDocument('nope')).toThrow(/^Invalid PAI export: .*not valid JSON/)
-    expect(() => parseExportDocument('[]')).toThrow(/^Invalid PAI export: /)
-    expect(() => parseExportDocument('{"version":3,"rules":[]}')).toThrow(
-      /^Invalid PAI export: .*version/,
+    expect(() => parseExportDocument('nope', opts)).toThrow(/^Invalid PAI export: .*not valid JSON/)
+    expect(() => parseExportDocument('[]', opts)).toThrow(/^Invalid PAI export: /)
+    expect(() => parseExportDocument('{"version":0,"rules":[]}', opts)).toThrow(
+      /^Invalid PAI export: .*unsupported version/,
     )
-    expect(() => parseExportDocument('{"version":2}')).toThrow(/^Invalid PAI export: .*"rules"/)
-    expect(() => parseExportDocument('{"version":2,"rules":[1]}')).toThrow(
+    expect(() => parseExportDocument('{"version":2}', opts)).toThrow(
+      /^Invalid PAI export: .*"rules"/,
+    )
+    expect(() => parseExportDocument('{"version":2,"rules":[1]}', opts)).toThrow(
       /^Invalid PAI export: rule 1 /,
     )
-    expect(() => parseExportDocument('{"version":2,"rules":[{"category":"x"}]}')).toThrow(
+    expect(() => parseExportDocument('{"version":2,"rules":[{"category":"x"}]}', opts)).toThrow(
       /^Invalid PAI export: rule 1 .*"rule"/,
     )
     expect(() =>
-      parseExportDocument('{"version":2,"rules":[{"rule":"x","category":"y","scope":"team"}]}'),
+      parseExportDocument(
+        '{"version":2,"rules":[{"rule":"x","category":"y","scope":"team"}]}',
+        opts,
+      ),
     ).toThrow(/^Invalid PAI export: rule 1 .*"scope"/)
   })
 })

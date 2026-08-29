@@ -68,6 +68,9 @@ const rules: ExportedRule[] = [
   { rule: 'Never force-push.', category: 'Git', scope: 'project' },
 ]
 
+const meta = { pai: '0.3.1', exportedAt: '2026-08-29T12:00:00.000Z' }
+const opts = { currentPaiVersion: '0.3.1' }
+
 describe('pai import into a machine with no CLAUDE.md files', () => {
   it('creates CLAUDE.md with the pointer and CLAUDE.pai.md with the rules', () => {
     const { home, cwd } = fakeMachine()
@@ -191,9 +194,9 @@ describe('pai import is idempotent', () => {
     const windowsFile = join(mkdtempSync(join(tmpdir(), 'pai-win-')), 'rules.json')
     writeFileSync(
       windowsFile,
-      Buffer.from(`﻿${serializeExportDocument(rules).replace(/\n/g, '\r\n')}`, 'utf16le'),
+      Buffer.from(`﻿${serializeExportDocument(rules, meta).replace(/\n/g, '\r\n')}`, 'utf16le'),
     )
-    const document = parseExportDocument(decodeTextFile(readFileSync(windowsFile)))
+    const document = parseExportDocument(decodeTextFile(readFileSync(windowsFile)), opts)
     expect(document.rules).toEqual(rules)
 
     const first = importRules(document.rules, cwd, home)
@@ -238,7 +241,7 @@ describe('pai export', () => {
     ])
   })
 
-  it('round-trips byte-identically: export → import into an empty machine → export', () => {
+  it('round-trips the same rules: export → import into an empty machine → export', () => {
     const source = fakeMachine()
     mkdirSync(join(source.home, '.claude'), { recursive: true })
     writeFileSync(
@@ -246,12 +249,23 @@ describe('pai export', () => {
       '# How We Work\n\nProse.\n\n## Communication\n- Keep answers short.\n- Do not add background.\n\n## Decisions\n- Ask first.\n',
     )
     writeFileSync(join(source.cwd, 'CLAUDE.md'), '## Git\n- Never force-push.\n')
-    const exported = serializeExportDocument(exportRules(source.cwd, source.home))
+    // exportedAt differs between the two exports, as it would in real usage,
+    // so only the rules are compared — not the raw bytes.
+    const exported = serializeExportDocument(exportRules(source.cwd, source.home), meta)
 
     const target = fakeMachine()
-    importRules(parseExportDocument(exported).rules, target.cwd, target.home)
-    const reExported = serializeExportDocument(exportRules(target.cwd, target.home))
+    importRules(parseExportDocument(exported, opts).rules, target.cwd, target.home)
+    const reExported = serializeExportDocument(exportRules(target.cwd, target.home), {
+      ...meta,
+      exportedAt: '2026-08-29T13:00:00.000Z',
+    })
 
-    expect(reExported).toBe(exported)
+    expect(parseExportDocument(reExported, opts).rules).toEqual(
+      parseExportDocument(exported, opts).rules,
+    )
+  })
+
+  it('produces byte-identical output for the same rules and meta', () => {
+    expect(serializeExportDocument(rules, meta)).toBe(serializeExportDocument(rules, meta))
   })
 })

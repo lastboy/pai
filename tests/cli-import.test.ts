@@ -17,10 +17,13 @@ beforeEach(() => {
   file = join(mkdtempSync(join(tmpdir(), 'pai-export-')), 'rules.json')
   writeFileSync(
     file,
-    serializeExportDocument([
-      { rule: 'Keep answers short.', category: 'Communication', scope: 'global' },
-      { rule: 'Ask first.', category: 'Decisions', scope: 'global' },
-    ]),
+    serializeExportDocument(
+      [
+        { rule: 'Keep answers short.', category: 'Communication', scope: 'global' },
+        { rule: 'Ask first.', category: 'Decisions', scope: 'global' },
+      ],
+      { pai: '0.3.1', exportedAt: '2026-08-29T12:00:00.000Z' },
+    ),
   )
 })
 
